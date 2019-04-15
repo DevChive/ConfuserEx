@@ -9,7 +9,6 @@ namespace Confuser.Core.Helpers {
 	///     The type of block in the key sequence
 	/// </summary>
 	public enum BlockKeyType {
-
 		/// <summary>
 		///     The state key should be explicitly set in the block
 		/// </summary>
@@ -19,14 +18,12 @@ namespace Confuser.Core.Helpers {
 		///     The state key could be assumed to be same as <see cref="BlockKey.EntryState" /> at the beginning of block.
 		/// </summary>
 		Incremental
-
 	}
 
 	/// <summary>
 	///     The information of the block in the key sequence
 	/// </summary>
 	public struct BlockKey {
-
 		/// <summary>
 		///     The state key at the beginning of the block
 		/// </summary>
@@ -41,7 +38,6 @@ namespace Confuser.Core.Helpers {
 		///     The type of block
 		/// </summary>
 		public BlockKeyType Type;
-
 	}
 
 	/// <summary>
@@ -63,12 +59,11 @@ namespace Confuser.Core.Helpers {
 	///     </code>
 	/// </remarks>
 	public static class KeySequence {
-
 		/// <summary>
 		///     Computes a key sequence of the given CFG.
 		/// </summary>
 		/// <param name="graph">The CFG.</param>
-		/// <param name="random">The random source.</param>
+		/// <param name="random">The random source, or <c>null</c> if key id is needed.</param>
 		/// <returns>The generated key sequence of the CFG.</returns>
 		public static BlockKey[] ComputeKeys(ControlFlowGraph graph, RandomGenerator random) {
 			var keys = new BlockKey[graph.Count];
@@ -85,7 +80,7 @@ namespace Confuser.Core.Helpers {
 			return keys;
 		}
 
-		private static void ProcessBlocks(BlockKey[] keys, ControlFlowGraph graph, RandomGenerator random) {
+		static void ProcessBlocks(BlockKey[] keys, ControlFlowGraph graph, RandomGenerator random) {
 			uint id = 0;
 			for (int i = 0; i < keys.Length; i++) {
 				keys[i].EntryState = id++;
@@ -131,7 +126,7 @@ namespace Confuser.Core.Helpers {
 								else if (eh.HandlerType == ExceptionHandlerType.Finally ||
 								         eh.HandlerType == ExceptionHandlerType.Fault) {
 									if (footerIndex >= graph.IndexOf(eh.HandlerStart) &&
-									    footerIndex < graph.IndexOf(eh.HandlerEnd))
+									    (eh.HandlerEnd == null || footerIndex < graph.IndexOf(eh.HandlerEnd)))
 										ehs.Add(eh);
 								}
 							}
@@ -163,7 +158,7 @@ namespace Confuser.Core.Helpers {
 							int footerIndex = graph.IndexOf(block.Footer);
 							foreach (var eh in graph.Body.ExceptionHandlers) {
 								if (footerIndex >= graph.IndexOf(eh.TryStart) &&
-								    footerIndex < graph.IndexOf(eh.TryEnd))
+								    (eh.TryEnd == null || footerIndex < graph.IndexOf(eh.TryEnd)))
 									ehs.Add(eh);
 							}
 							ehMap[block] = ehs;
@@ -195,22 +190,23 @@ namespace Confuser.Core.Helpers {
 				}
 			} while (updated);
 
-			// Replace id with actual values
-			var idMap = new Dictionary<uint, uint>();
-			for (int i = 0; i < keys.Length; i++) {
-				BlockKey key = keys[i];
+			if (random != null) {
+				// Replace id with actual values
+				var idMap = new Dictionary<uint, uint>();
+				for (int i = 0; i < keys.Length; i++) {
+					BlockKey key = keys[i];
 
-				uint entryId = key.EntryState;
-				if (!idMap.TryGetValue(entryId, out key.EntryState))
-					key.EntryState = idMap[entryId] = random.NextUInt32();
+					uint entryId = key.EntryState;
+					if (!idMap.TryGetValue(entryId, out key.EntryState))
+						key.EntryState = idMap[entryId] = random.NextUInt32();
 
-				uint exitId = key.ExitState;
-				if (!idMap.TryGetValue(exitId, out key.ExitState))
-					key.ExitState = idMap[exitId] = random.NextUInt32();
+					uint exitId = key.ExitState;
+					if (!idMap.TryGetValue(exitId, out key.ExitState))
+						key.ExitState = idMap[exitId] = random.NextUInt32();
 
-				keys[i] = key;
+					keys[i] = key;
+				}
 			}
 		}
-
 	}
 }

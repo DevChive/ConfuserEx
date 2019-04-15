@@ -9,9 +9,8 @@ using dnlib.DotNet.Writer;
 
 namespace Confuser.Protections.Compress {
 	internal class StubProtection : Protection {
-
-		private readonly CompressorContext ctx;
-		private readonly ModuleDef originModule;
+		readonly CompressorContext ctx;
+		readonly ModuleDef originModule;
 
 		internal StubProtection(CompressorContext ctx, ModuleDef originModule) {
 			this.ctx = ctx;
@@ -43,12 +42,12 @@ namespace Confuser.Protections.Compress {
 		}
 
 		protected override void PopulatePipeline(ProtectionPipeline pipeline) {
-			pipeline.InsertPreStage(PipelineStage.Inspection, new InjPhase(this));
+			if (!ctx.CompatMode)
+				pipeline.InsertPreStage(PipelineStage.Inspection, new InjPhase(this));
 			pipeline.InsertPostStage(PipelineStage.BeginModule, new SigPhase(this));
 		}
 
-		private class InjPhase : ProtectionPhase {
-
+		class InjPhase : ProtectionPhase {
 			public InjPhase(StubProtection parent)
 				: base(parent) { }
 
@@ -70,11 +69,9 @@ namespace Confuser.Protections.Compress {
 				originModule.Assembly.Modules.Remove(originModule);
 				context.Modules[0].Assembly.Modules.Add(((StubProtection)Parent).originModule);
 			}
-
 		}
 
-		private class SigPhase : ProtectionPhase {
-
+		class SigPhase : ProtectionPhase {
 			public SigPhase(StubProtection parent)
 				: base(parent) { }
 
@@ -94,11 +91,14 @@ namespace Confuser.Protections.Compress {
 				context.CurrentModuleWriterListener.OnWriterEvent += (sender, e) => {
 					if (e.WriterEvent == ModuleWriterEvent.MDBeginCreateTables) {
 						// Add key signature
-						var writer = (ModuleWriter)sender;
+						var writer = (ModuleWriterBase)sender;
 						var prot = (StubProtection)Parent;
 						uint blob = writer.MetaData.BlobHeap.Add(prot.ctx.KeySig);
 						uint rid = writer.MetaData.TablesHeap.StandAloneSigTable.Add(new RawStandAloneSigRow(blob));
 						Debug.Assert((0x11000000 | rid) == prot.ctx.KeyToken);
+
+						if (prot.ctx.CompatMode)
+							return;
 
 						// Add File reference
 						byte[] hash = SHA1.Create().ComputeHash(prot.ctx.OriginModule);
@@ -112,8 +112,6 @@ namespace Confuser.Protections.Compress {
 					}
 				};
 			}
-
 		}
-
 	}
 }

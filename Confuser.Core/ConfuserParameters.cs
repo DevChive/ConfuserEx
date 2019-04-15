@@ -6,7 +6,6 @@ namespace Confuser.Core {
 	///     Parameters that passed to <see cref="ConfuserEngine" />.
 	/// </summary>
 	public class ConfuserParameters {
-
 		/// <summary>
 		///     Gets or sets the project that would be processed.
 		/// </summary>
@@ -54,8 +53,7 @@ namespace Confuser.Core {
 		/// </summary>
 		/// <returns>The marker.</returns>
 		internal Marker GetMarker() {
-			return Marker ?? new Marker();
+			return Marker ?? new ObfAttrMarker();
 		}
-
 	}
 }

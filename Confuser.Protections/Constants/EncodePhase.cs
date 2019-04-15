@@ -13,7 +13,6 @@ using dnlib.DotNet.Emit;
 
 namespace Confuser.Protections.Constants {
 	internal class EncodePhase : ProtectionPhase {
-
 		public EncodePhase(ConstantProtection parent)
 			: base(parent) { }
 
@@ -57,7 +56,7 @@ namespace Confuser.Protections.Constants {
 				else if (entry.Key is float) {
 					var t = new RTransform();
 					t.R4 = (float)entry.Key;
-					EncodeConstant32(moduleCtx, t.Hi, context.CurrentModule.CorLibTypes.Single, entry.Value);
+					EncodeConstant32(moduleCtx, t.Lo, context.CurrentModule.CorLibTypes.Single, entry.Value);
 				}
 				else if (entry.Key is double) {
 					var t = new RTransform();
@@ -128,13 +127,13 @@ namespace Confuser.Protections.Constants {
 			});
 		}
 
-		private void EncodeString(CEContext moduleCtx, string value, List<Tuple<MethodDef, Instruction>> references) {
+		void EncodeString(CEContext moduleCtx, string value, List<Tuple<MethodDef, Instruction>> references) {
 			int buffIndex = EncodeByteArray(moduleCtx, Encoding.UTF8.GetBytes(value));
 
 			UpdateReference(moduleCtx, moduleCtx.Module.CorLibTypes.String, references, buffIndex, desc => desc.StringID);
 		}
 
-		private void EncodeConstant32(CEContext moduleCtx, uint value, TypeSig valueType, List<Tuple<MethodDef, Instruction>> references) {
+		void EncodeConstant32(CEContext moduleCtx, uint value, TypeSig valueType, List<Tuple<MethodDef, Instruction>> references) {
 			int buffIndex = moduleCtx.EncodedBuffer.IndexOf(value);
 			if (buffIndex == -1) {
 				buffIndex = moduleCtx.EncodedBuffer.Count;
@@ -144,25 +143,24 @@ namespace Confuser.Protections.Constants {
 			UpdateReference(moduleCtx, valueType, references, buffIndex, desc => desc.NumberID);
 		}
 
-		private void EncodeConstant64(CEContext moduleCtx, uint hi, uint lo, TypeSig valueType, List<Tuple<MethodDef, Instruction>> references) {
-			int buffIndex = moduleCtx.EncodedBuffer.IndexOf(hi);
-			while (buffIndex != -1) {
-				if (moduleCtx.EncodedBuffer[buffIndex + 1] == lo)
+		void EncodeConstant64(CEContext moduleCtx, uint hi, uint lo, TypeSig valueType, List<Tuple<MethodDef, Instruction>> references) {
+			int buffIndex = -1;
+			do {
+				buffIndex = moduleCtx.EncodedBuffer.IndexOf(lo, buffIndex + 1);
+				if (buffIndex + 1 < moduleCtx.EncodedBuffer.Count && moduleCtx.EncodedBuffer[buffIndex + 1] == hi)
 					break;
-				buffIndex = moduleCtx.EncodedBuffer.IndexOf(hi, buffIndex + 1);
-				if (buffIndex + 1 >= moduleCtx.EncodedBuffer.Count)
-					buffIndex = -1;
-			}
+			} while (buffIndex >= 0);
+			
 			if (buffIndex == -1) {
 				buffIndex = moduleCtx.EncodedBuffer.Count;
-				moduleCtx.EncodedBuffer.Add(hi);
 				moduleCtx.EncodedBuffer.Add(lo);
+				moduleCtx.EncodedBuffer.Add(hi);
 			}
 
 			UpdateReference(moduleCtx, valueType, references, buffIndex, desc => desc.NumberID);
 		}
 
-		private void EncodeInitializer(CEContext moduleCtx, byte[] init, List<Tuple<MethodDef, Instruction>> references) {
+		void EncodeInitializer(CEContext moduleCtx, byte[] init, List<Tuple<MethodDef, Instruction>> references) {
 			int buffIndex = -1;
 
 			foreach (var instr in references) {
@@ -186,7 +184,7 @@ namespace Confuser.Protections.Constants {
 			}
 		}
 
-		private int EncodeByteArray(CEContext moduleCtx, byte[] buff) {
+		int EncodeByteArray(CEContext moduleCtx, byte[] buff) {
 			int buffIndex = moduleCtx.EncodedBuffer.Count;
 			moduleCtx.EncodedBuffer.Add((uint)buff.Length);
 
@@ -206,7 +204,7 @@ namespace Confuser.Protections.Constants {
 			return buffIndex;
 		}
 
-		private void UpdateReference(CEContext moduleCtx, TypeSig valueType, List<Tuple<MethodDef, Instruction>> references, int buffIndex, Func<DecoderDesc, byte> typeID) {
+		void UpdateReference(CEContext moduleCtx, TypeSig valueType, List<Tuple<MethodDef, Instruction>> references, int buffIndex, Func<DecoderDesc, byte> typeID) {
 			foreach (var instr in references) {
 				Tuple<MethodDef, DecoderDesc> decoder = moduleCtx.Decoders[moduleCtx.Random.NextInt32(moduleCtx.Decoders.Count)];
 				uint id = (uint)buffIndex | (uint)(typeID(decoder.Item2) << 30);
@@ -217,16 +215,31 @@ namespace Confuser.Protections.Constants {
 			}
 		}
 
-		private void ExtractConstants(
+		void RemoveDataFieldRefs(ConfuserContext context, HashSet<FieldDef> dataFields, HashSet<Instruction> fieldRefs) {
+			foreach (var type in context.CurrentModule.GetTypes())
+				foreach (var method in type.Methods.Where(m => m.HasBody)) {
+					foreach (var instr in method.Body.Instructions)
+						if (instr.Operand is FieldDef && !fieldRefs.Contains(instr))
+							dataFields.Remove((FieldDef)instr.Operand);
+				}
+
+			foreach (var fieldToRemove in dataFields) {
+				fieldToRemove.DeclaringType.Fields.Remove(fieldToRemove);
+			}
+		}
+
+		void ExtractConstants(
 			ConfuserContext context, ProtectionParameters parameters, CEContext moduleCtx,
 			Dictionary<object, List<Tuple<MethodDef, Instruction>>> ldc,
 			Dictionary<byte[], List<Tuple<MethodDef, Instruction>>> ldInit) {
+			var dataFields = new HashSet<FieldDef>();
+			var fieldRefs = new HashSet<Instruction>();
 			foreach (MethodDef method in parameters.Targets.OfType<MethodDef>().WithProgress(context.Logger)) {
 				if (!method.HasBody)
 					continue;
 
 				moduleCtx.Elements = 0;
-				string elements = parameters.GetParameter(context, context.CurrentModule, "elements", "SI");
+				string elements = parameters.GetParameter(context, method, "elements", "SI");
 				foreach (char elem in elements)
 					switch (elem) {
 						case 'S':
@@ -286,7 +299,9 @@ namespace Confuser.Protections.Constants {
 									ldc.Remove(arrLen);
 							}
 
-							dataField.DeclaringType.Fields.Remove(dataField);
+							dataFields.Add(dataField);
+							fieldRefs.Add(instrs[i - 1]);
+
 							var value = new byte[dataField.InitialValue.Length + 4];
 							value[0] = (byte)(arrLen >> 0);
 							value[1] = (byte)(arrLen >> 8);
@@ -329,10 +344,10 @@ namespace Confuser.Protections.Constants {
 
 				context.CheckCancellation();
 			}
+			RemoveDataFieldRefs(context, dataFields, fieldRefs);
 		}
 
-		private class ByteArrayComparer : IEqualityComparer<byte[]> {
-
+		class ByteArrayComparer : IEqualityComparer<byte[]> {
 			public bool Equals(byte[] x, byte[] y) {
 				return x.SequenceEqual(y);
 			}
@@ -343,19 +358,15 @@ namespace Confuser.Protections.Constants {
 					ret = ret * 17 + v;
 				return ret;
 			}
-
 		}
 
 		[StructLayout(LayoutKind.Explicit)]
-		private struct RTransform {
-
+		struct RTransform {
 			[FieldOffset(0)] public float R4;
 			[FieldOffset(0)] public double R8;
 
-			[FieldOffset(0)] public readonly uint Hi;
-			[FieldOffset(4)] public readonly uint Lo;
-
+			[FieldOffset(4)] public readonly uint Hi;
+			[FieldOffset(0)] public readonly uint Lo;
 		}
-
 	}
 }

@@ -11,7 +11,6 @@ namespace Confuser.Core {
 	///     Provides a set of utility methods about dnlib
 	/// </summary>
 	public static class DnlibUtils {
-
 		/// <summary>
 		///     Finds all definitions of interest in a module.
 		/// </summary>
@@ -64,10 +63,11 @@ namespace Confuser.Core {
 		///     Determines whether the specified type is visible outside the containing assembly.
 		/// </summary>
 		/// <param name="typeDef">The type.</param>
+		/// <param name="exeNonPublic">Visibility of executable modules.</param>
 		/// <returns><c>true</c> if the specified type is visible outside the containing assembly; otherwise, <c>false</c>.</returns>
-		public static bool IsVisibleOutside(this TypeDef typeDef) {
+		public static bool IsVisibleOutside(this TypeDef typeDef, bool exeNonPublic = true) {
 			// Assume executable modules' type is not visible
-			if (typeDef.Module.Kind == ModuleKind.Windows || typeDef.Module.Kind == ModuleKind.Console)
+			if (exeNonPublic && (typeDef.Module.Kind == ModuleKind.Windows || typeDef.Module.Kind == ModuleKind.Console))
 				return false;
 
 			do {
@@ -103,6 +103,15 @@ namespace Confuser.Core {
 		}
 
 		/// <summary>
+		///     Determines whether the specified type is compiler generated.
+		/// </summary>
+		/// <param name="type">The type.</param>
+		/// <returns><c>true</c> if specified type is compiler generated; otherwise, <c>false</c>.</returns>
+		public static bool IsCompilerGenerated(this TypeDef type) {
+			return type.HasAttribute("System.Runtime.CompilerServices.CompilerGeneratedAttribute");
+		}
+
+		/// <summary>
 		///     Determines whether the specified type is a delegate.
 		/// </summary>
 		/// <param name="type">The type.</param>
@@ -135,6 +144,25 @@ namespace Confuser.Core {
 		}
 
 		/// <summary>
+		///     Determines whether the specified type is inherited from a base type.
+		/// </summary>
+		/// <param name="type">The type.</param>
+		/// <param name="baseType">The full name of base type.</param>
+		/// <returns><c>true</c> if the specified type is inherited from a base type; otherwise, <c>false</c>.</returns>
+		public static bool InheritsFrom(this TypeDef type, string baseType) {
+			if (type.BaseType == null)
+				return false;
+
+			TypeDef bas = type;
+			do {
+				bas = bas.BaseType.ResolveTypeDefThrow();
+				if (bas.ReflectionFullName == baseType)
+					return true;
+			} while (bas.BaseType != null);
+			return false;
+		}
+
+		/// <summary>
 		///     Determines whether the specified type implements the specified interface.
 		/// </summary>
 		/// <param name="type">The type.</param>
@@ -143,7 +171,7 @@ namespace Confuser.Core {
 		public static bool Implements(this TypeDef type, string fullName) {
 			do {
 				foreach (InterfaceImpl iface in type.Interfaces) {
-					if (iface.Interface.FullName == fullName)
+					if (iface.Interface.ReflectionFullName == fullName)
 						return true;
 				}
 
@@ -214,7 +242,7 @@ namespace Confuser.Core {
 			return ret;
 		}
 
-		private static void FindTypeRefsInternal(TypeSig typeSig, IList<ITypeDefOrRef> ret) {
+		static void FindTypeRefsInternal(TypeSig typeSig, IList<ITypeDefOrRef> ret) {
 			while (typeSig.Next != null) {
 				if (typeSig is ModifierSig)
 					ret.Add(((ModifierSig)typeSig).Modifier);
@@ -227,8 +255,13 @@ namespace Confuser.Core {
 				foreach (TypeSig genArg in genInst.GenericArguments)
 					FindTypeRefsInternal(genArg, ret);
 			}
-			else if (typeSig is TypeDefOrRefSig)
-				ret.Add(((TypeDefOrRefSig)typeSig).TypeDefOrRef);
+			else if (typeSig is TypeDefOrRefSig) {
+				var type = ((TypeDefOrRefSig)typeSig).TypeDefOrRef;
+				while (type != null) {
+					ret.Add(type);
+					type = type.DeclaringType;
+				}
+			}
 		}
 
 		/// <summary>
@@ -326,6 +359,21 @@ namespace Confuser.Core {
 			}
 		}
 
+		/// <summary>
+		///     Determines whether the specified method is array accessors.
+		/// </summary>
+		/// <param name="method">The method.</param>
+		/// <returns><c>true</c> if the specified method is array accessors; otherwise, <c>false</c>.</returns>
+		public static bool IsArrayAccessors(this IMethod method) {
+			var declType = method.DeclaringType.ToTypeSig();
+			if (declType is GenericInstSig)
+				declType = ((GenericInstSig)declType).GenericType;
+
+			if (declType.IsArray) {
+				return method.Name == "Get" || method.Name == "Set" || method.Name == "Address";
+			}
+			return false;
+		}
 	}
 
 
@@ -333,7 +381,6 @@ namespace Confuser.Core {
 	///     <see cref="Stream" /> wrapper of <see cref="IImageStream" />.
 	/// </summary>
 	public class ImageStream : Stream {
-
 		/// <summary>
 		///     Initializes a new instance of the <see cref="ImageStream" /> class.
 		/// </summary>
@@ -407,6 +454,5 @@ namespace Confuser.Core {
 		public override void Write(byte[] buffer, int offset, int count) {
 			throw new NotSupportedException();
 		}
-
 	}
 }

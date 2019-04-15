@@ -4,7 +4,6 @@ using dnlib.DotNet;
 
 namespace Confuser.Renamer {
 	internal class PostRenamePhase : ProtectionPhase {
-
 		public PostRenamePhase(NameProtection parent)
 			: base(parent) { }
 
@@ -25,10 +24,9 @@ namespace Confuser.Renamer {
 
 			foreach (IRenamer renamer in service.Renamers) {
 				foreach (IDnlibDef def in parameters.Targets)
-					renamer.PostRename(context, service, def);
+					renamer.PostRename(context, service, parameters, def);
 				context.CheckCancellation();
 			}
 		}
-
 	}
 }

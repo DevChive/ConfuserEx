@@ -9,7 +9,6 @@ using dnlib.DotNet.Writer;
 
 namespace Confuser.Protections {
 	internal class InvalidMetadataProtection : Protection {
-
 		public const string _Id = "invalid metadata";
 		public const string _FullId = "Ki.InvalidMD";
 
@@ -30,7 +29,7 @@ namespace Confuser.Protections {
 		}
 
 		public override ProtectionPreset Preset {
-			get { return ProtectionPreset.Maximum; }
+			get { return ProtectionPreset.None; }
 		}
 
 		protected override void Initialize(ConfuserContext context) {
@@ -41,9 +40,8 @@ namespace Confuser.Protections {
 			pipeline.InsertPostStage(PipelineStage.BeginModule, new InvalidMDPhase(this));
 		}
 
-		private class InvalidMDPhase : ProtectionPhase {
-
-			private RandomGenerator random;
+		class InvalidMDPhase : ProtectionPhase {
+			RandomGenerator random;
 
 			public InvalidMDPhase(InvalidMetadataProtection parent)
 				: base(parent) { }
@@ -63,7 +61,7 @@ namespace Confuser.Protections {
 				}
 			}
 
-			private void Randomize<T>(MDTable<T> table) where T : IRawRow {
+			void Randomize<T>(MDTable<T> table) where T : IRawRow {
 				List<T> rows = table.ToList();
 				random.Shuffle(rows);
 				table.Reset();
@@ -71,8 +69,8 @@ namespace Confuser.Protections {
 					table.Add(row);
 			}
 
-			private void OnWriterEvent(object sender, ModuleWriterListenerEventArgs e) {
-				var writer = (ModuleWriter)sender;
+			void OnWriterEvent(object sender, ModuleWriterListenerEventArgs e) {
+				var writer = (ModuleWriterBase)sender;
 				if (e.WriterEvent == ModuleWriterEvent.MDEndCreateTables) {
 					// These hurts reflection
 
@@ -114,13 +112,23 @@ namespace Confuser.Protections {
 					Randomize(writer.MetaData.TablesHeap.ManifestResourceTable);
 					//Randomize(writer.MetaData.TablesHeap.GenericParamConstraintTable);
 
-					writer.Options.MetaDataOptions.TablesHeapOptions.ExtraData = random.NextUInt32();
-					writer.Options.MetaDataOptions.TablesHeapOptions.UseENC = false;
-					writer.Options.MetaDataOptions.MetaDataHeaderOptions.VersionString += "\0\0\0\0";
+					writer.TheOptions.MetaDataOptions.TablesHeapOptions.ExtraData = random.NextUInt32();
+					writer.TheOptions.MetaDataOptions.TablesHeapOptions.UseENC = false;
+					writer.TheOptions.MetaDataOptions.MetaDataHeaderOptions.VersionString += "\0\0\0\0";
 
-					writer.Options.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#Strings", new byte[1]));
-					writer.Options.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#Blob", new byte[1]));
-					writer.Options.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#Schema", new byte[1]));
+					/*
+					We are going to create a new specific '#GUID' Heap to avoid UnConfuserEX to work.
+					<sarcasm>UnConfuserEX is so well coded, it relies on static cmp between values</sarcasm>
+					If you deobfuscate this tool, you can see that it check for #GUID size and compare it to
+					'16', so we have to create a new array of byte wich size is exactly 16 and put it into 
+					our brand new Heap
+					*/
+					//
+                    writer.TheOptions.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#GUID", Guid.NewGuid().ToByteArray()));
+					//
+					writer.TheOptions.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#Strings", new byte[1]));
+					writer.TheOptions.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#Blob", new byte[1]));
+					writer.TheOptions.MetaDataOptions.OtherHeapsEnd.Add(new RawHeap("#Schema", new byte[1]));
 				}
 				else if (e.WriterEvent == ModuleWriterEvent.MDOnAllTablesSorted) {
 					writer.MetaData.TablesHeap.DeclSecurityTable.Add(new RawDeclSecurityRow(
@@ -131,13 +139,11 @@ namespace Confuser.Protections {
 					*/
 				}
 			}
-
 		}
 
-		private class RawHeap : HeapBase {
-
-			private readonly byte[] content;
-			private readonly string name;
+		class RawHeap : HeapBase {
+			readonly byte[] content;
+			readonly string name;
 
 			public RawHeap(string name, byte[] content) {
 				this.name = name;
@@ -155,8 +161,6 @@ namespace Confuser.Protections {
 			protected override void WriteToImpl(BinaryWriter writer) {
 				writer.Write(content);
 			}
-
 		}
-
 	}
 }

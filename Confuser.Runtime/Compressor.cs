@@ -6,10 +6,9 @@ using System.Text;
 
 namespace Confuser.Runtime {
 	internal static class Compressor {
+		static byte[] key;
 
-		private static byte[] key;
-
-		private static GCHandle Decrypt(uint[] data, uint seed) {
+		static GCHandle Decrypt(uint[] data, uint seed) {
 			var w = new uint[0x10];
 			var k = new uint[0x10];
 			ulong s = seed;
@@ -47,7 +46,7 @@ namespace Confuser.Runtime {
 		}
 
 		[STAThread]
-		private static int Main(string[] args) {
+		static int Main(string[] args) {
 			var l = (uint)Mutation.KeyI0;
 			uint[] q = Mutation.Placeholder(new uint[Mutation.KeyI0]);
 
@@ -63,6 +62,9 @@ namespace Confuser.Runtime {
 			key = n.ResolveSignature(Mutation.KeyI2);
 			AppDomain.CurrentDomain.AssemblyResolve += Resolve;
 
+			// For some reasons, reflection on Assembly would not discover the types unless GetTypes is called.
+			m.GetTypes();
+
 			MethodBase e = m.ResolveMethod(key[0] | (key[1] << 8) | (key[2] << 16) | (key[3] << 24));
 			var g = new object[e.GetParameters().Length];
 			if (g.Length != 0)
@@ -73,12 +75,16 @@ namespace Confuser.Runtime {
 			return 0;
 		}
 
-		private static Assembly Resolve(object sender, ResolveEventArgs e) {
-			byte[] b = Encoding.UTF8.GetBytes(e.Name);
-			for (int i = 0; i < b.Length; i++)
-				b[i] *= key[i + 4];
-			string n = Convert.ToBase64String(b);
-			Stream m = Assembly.GetEntryAssembly().GetManifestResourceStream(n);
+		static Assembly Resolve(object sender, ResolveEventArgs e) {
+			byte[] b = Encoding.UTF8.GetBytes(new AssemblyName(e.Name).FullName.ToUpperInvariant());
+
+			Stream m = null;
+			if (b.Length + 4 <= key.Length) {
+				for (int i = 0; i < b.Length; i++)
+					b[i] *= key[i + 4];
+				string n = Convert.ToBase64String(b);
+				m = Assembly.GetEntryAssembly().GetManifestResourceStream(n);
+			}
 			if (m != null) {
 				var d = new uint[m.Length >> 2];
 				var t = new byte[0x100];
@@ -103,6 +109,5 @@ namespace Confuser.Runtime {
 			}
 			return null;
 		}
-
 	}
 }

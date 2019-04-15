@@ -11,7 +11,6 @@ using dnlib.DotNet.Emit;
 namespace Confuser.Protections {
 	[BeforeProtection("Ki.ControlFlow")]
 	internal class AntiDebugProtection : Protection {
-
 		public const string _Id = "anti debug";
 		public const string _FullId = "Ki.AntiDebug";
 
@@ -43,8 +42,7 @@ namespace Confuser.Protections {
 			pipeline.InsertPreStage(PipelineStage.ProcessModule, new AntiDebugPhase(this));
 		}
 
-		private class AntiDebugPhase : ProtectionPhase {
-
+		class AntiDebugPhase : ProtectionPhase {
 			public AntiDebugPhase(AntiDebugProtection parent)
 				: base(parent) { }
 
@@ -80,7 +78,7 @@ namespace Confuser.Protections {
 							attr = rt.GetRuntimeType(attrName);
 							module.Types.Add(attr = InjectHelper.Inject(attr, module));
 							foreach (IDnlibDef member in attr.FindDefinitions()) {
-								marker.Mark(member);
+								marker.Mark(member, (Protection)Parent);
 								name.Analyze(member);
 							}
 							name.SetCanRename(attr, false);
@@ -96,7 +94,7 @@ namespace Confuser.Protections {
 					cctor.Body.Instructions.Insert(0, Instruction.Create(OpCodes.Call, init));
 
 					foreach (IDnlibDef member in members) {
-						marker.Mark(member);
+						marker.Mark(member, (Protection)Parent);
 						name.Analyze(member);
 
 						bool ren = true;
@@ -130,15 +128,11 @@ namespace Confuser.Protections {
 				}
 			}
 
-			private enum AntiMode {
-
+			enum AntiMode {
 				Safe,
 				Win32,
 				Antinet
-
 			}
-
 		}
-
 	}
 }

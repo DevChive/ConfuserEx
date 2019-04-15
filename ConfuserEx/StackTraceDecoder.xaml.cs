@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using Confuser.Core;
+using Confuser.Renamer;
 using Ookii.Dialogs.Wpf;
 
 namespace ConfuserEx {
@@ -12,19 +13,18 @@ namespace ConfuserEx {
 	///     Interaction logic for StackTraceDecoder.xaml
 	/// </summary>
 	public partial class StackTraceDecoder : Window {
-
 		public StackTraceDecoder() {
 			InitializeComponent();
 		}
 
-		private readonly Dictionary<string, string> symMap = new Dictionary<string, string>();
+		readonly Dictionary<string, string> symMap = new Dictionary<string, string>();
 
-		private void PathBox_TextChanged(object sender, TextChangedEventArgs e) {
+		void PathBox_TextChanged(object sender, TextChangedEventArgs e) {
 			if (File.Exists(PathBox.Text))
 				LoadSymMap(PathBox.Text);
 		}
 
-		private void LoadSymMap(string path) {
+		void LoadSymMap(string path) {
 			string shortPath = path;
 			if (path.Length > 35)
 				shortPath = "..." + path.Substring(path.Length - 35, 35);
@@ -48,7 +48,7 @@ namespace ConfuserEx {
 			}
 		}
 
-		private void ChooseMapPath(object sender, RoutedEventArgs e) {
+		void ChooseMapPath(object sender, RoutedEventArgs e) {
 			var ofd = new VistaOpenFileDialog();
 			ofd.Filter = "Symbol maps (*.map)|*.map|All Files (*.*)|*.*";
 			if (ofd.ShowDialog() ?? false) {
@@ -56,17 +56,33 @@ namespace ConfuserEx {
 			}
 		}
 
-		private readonly Regex symbolMatcher = new Regex("=[a-zA-Z0-9]+=");
+		readonly Regex mapSymbolMatcher = new Regex("_[a-zA-Z0-9]+");
+		readonly Regex passSymbolMatcher = new Regex("[a-zA-Z0-9_$]{23,}");
+		ReversibleRenamer renamer;
 
-		private void Decode_Click(object sender, RoutedEventArgs e) {
+		void Decode_Click(object sender, RoutedEventArgs e) {
 			var trace = stackTrace.Text;
-			stackTrace.Text = symbolMatcher.Replace(trace, DecodeSymbol);
+			if (optSym.IsChecked ?? true)
+				stackTrace.Text = mapSymbolMatcher.Replace(trace, DecodeSymbolMap);
+			else {
+				renamer = new ReversibleRenamer(PassBox.Text);
+				stackTrace.Text = passSymbolMatcher.Replace(trace, DecodeSymbolPass);
+			}
 		}
 
-		private string DecodeSymbol(Match match) {
+		string DecodeSymbolMap(Match match) {
 			var sym = match.Value;
 			return symMap.GetValueOrDefault(sym, sym);
 		}
 
+		string DecodeSymbolPass(Match match) {
+			var sym = match.Value;
+			try {
+				return renamer.Decrypt(sym);
+			}
+			catch {
+				return sym;
+			}
+		}
 	}
 }

@@ -9,23 +9,19 @@ using dnlib.DotNet.Emit;
 
 namespace Confuser.Protections.ReferenceProxy {
 	internal enum Mode {
-
 		Mild,
 		Strong,
 		Ftn
-
 	}
 
 	internal enum EncodingType {
-
 		Normal,
 		Expression,
 		x86
-
 	}
 
 	internal class RPContext {
-
+		public ReferenceProxyProtection Protection;
 		public CilBody Body;
 		public HashSet<Instruction> BranchTargets;
 		public ConfuserContext Context;
@@ -45,6 +41,5 @@ namespace Confuser.Protections.ReferenceProxy {
 		public INameService Name;
 		public RandomGenerator Random;
 		public bool TypeErasure;
-
 	}
 }

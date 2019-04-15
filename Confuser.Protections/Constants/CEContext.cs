@@ -9,8 +9,8 @@ using dnlib.DotNet.Emit;
 
 namespace Confuser.Protections.Constants {
 	internal class CEContext {
-
 		public ConfuserContext Context;
+		public ConstantProtection Protection;
 		public ModuleDef Module;
 
 		public FieldDef BufferField;
@@ -32,16 +32,16 @@ namespace Confuser.Protections.Constants {
 		public INameService Name;
 		public RandomGenerator Random;
 
+		public TypeDef CfgCtxType;
+		public MethodDef CfgCtxCtor;
+		public MethodDef CfgCtxNext;
 		public Dictionary<MethodDef, List<Tuple<Instruction, uint, IMethod>>> ReferenceRepl;
-
 	}
 
 	internal class DecoderDesc {
-
 		public object Data;
 		public byte InitializerID;
 		public byte NumberID;
 		public byte StringID;
-
 	}
 }

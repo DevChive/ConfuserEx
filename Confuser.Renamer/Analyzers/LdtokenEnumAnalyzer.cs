@@ -6,8 +6,7 @@ using dnlib.DotNet.Emit;
 
 namespace Confuser.Renamer.Analyzers {
 	internal class LdtokenEnumAnalyzer : IRenamer {
-
-		public void Analyze(ConfuserContext context, INameService service, IDnlibDef def) {
+		public void Analyze(ConfuserContext context, INameService service, ProtectionParameters parameters, IDnlibDef def) {
 			var method = def as MethodDef;
 			if (method == null || !method.HasBody)
 				return;
@@ -30,16 +29,24 @@ namespace Confuser.Renamer.Analyzers {
 							service.SetCanRename(field, false);
 					}
 					else if (instr.Operand is IMethod) {
-						MethodDef m = ((IMethod)instr.Operand).ResolveThrow();
-						if (context.Modules.Contains((ModuleDefMD)m.Module))
-							service.SetCanRename(method, false);
+						var im = (IMethod)instr.Operand;
+						if (!im.IsArrayAccessors()) {
+							MethodDef m = im.ResolveThrow();
+							if (context.Modules.Contains((ModuleDefMD)m.Module))
+								service.SetCanRename(method, false);
+						}
 					}
 					else if (instr.Operand is ITypeDefOrRef) {
 						if (!(instr.Operand is TypeSpec)) {
 							TypeDef type = ((ITypeDefOrRef)instr.Operand).ResolveTypeDefThrow();
 							if (context.Modules.Contains((ModuleDefMD)type.Module) &&
-							    HandleTypeOf(context, service, method, i))
-								DisableRename(service, type, false);
+							    HandleTypeOf(context, service, method, i)) {
+								var t = type;
+								do {
+									DisableRename(service, t, false);
+									t = t.DeclaringType;
+								} while (t != null);
+							}
 						}
 					}
 					else
@@ -57,15 +64,15 @@ namespace Confuser.Renamer.Analyzers {
 			}
 		}
 
-		public void PreRename(ConfuserContext context, INameService service, IDnlibDef def) {
+		public void PreRename(ConfuserContext context, INameService service, ProtectionParameters parameters, IDnlibDef def) {
 			//
 		}
 
-		public void PostRename(ConfuserContext context, INameService service, IDnlibDef def) {
+		public void PostRename(ConfuserContext context, INameService service, ProtectionParameters parameters, IDnlibDef def) {
 			//
 		}
 
-		private void HandleEnum(ConfuserContext context, INameService service, MethodDef method, int index) {
+		void HandleEnum(ConfuserContext context, INameService service, MethodDef method, int index) {
 			var target = (IMethod)method.Body.Instructions[index].Operand;
 			if (target.FullName == "System.String System.Object::ToString()" ||
 			    target.FullName == "System.String System.Enum::ToString(System.String)") {
@@ -111,7 +118,7 @@ namespace Confuser.Renamer.Analyzers {
 			}
 		}
 
-		private bool HandleTypeOf(ConfuserContext context, INameService service, MethodDef method, int index) {
+		bool HandleTypeOf(ConfuserContext context, INameService service, MethodDef method, int index) {
 			if (index + 1 >= method.Body.Instructions.Count)
 				return true;
 
@@ -154,10 +161,10 @@ namespace Confuser.Renamer.Analyzers {
 				}
 			}
 
-			return true;
+			return false;
 		}
 
-		private void DisableRename(INameService service, TypeDef typeDef, bool memberOnly = true) {
+		void DisableRename(INameService service, TypeDef typeDef, bool memberOnly = true) {
 			service.SetCanRename(typeDef, false);
 
 			foreach (MethodDef m in typeDef.Methods)
@@ -175,6 +182,5 @@ namespace Confuser.Renamer.Analyzers {
 			foreach (TypeDef nested in typeDef.NestedTypes)
 				DisableRename(service, nested, false);
 		}
-
 	}
 }

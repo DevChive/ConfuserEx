@@ -9,15 +9,14 @@ namespace Confuser.Core {
 	///     Parameters of <see cref="ConfuserComponent" />.
 	/// </summary>
 	public class ProtectionParameters {
-
-		private static readonly object ParametersKey = new object();
+		static readonly object ParametersKey = new object();
 
 		/// <summary>
 		///     A empty instance of <see cref="ProtectionParameters" />.
 		/// </summary>
 		public static readonly ProtectionParameters Empty = new ProtectionParameters(null, new IDnlibDef[0]);
 
-		private readonly ConfuserComponent comp;
+		readonly ConfuserComponent comp;
 
 		/// <summary>
 		///     Initializes a new instance of the <see cref="ProtectionParameters" /> class.
@@ -52,18 +51,17 @@ namespace Confuser.Core {
 			if (comp == null)
 				return defValue;
 
-			// For packers
-			if (comp is Packer) {
-				parameters = new Dictionary<string, string>(context.Project.Packer, StringComparer.OrdinalIgnoreCase);
+			if (comp is Packer && target == null) {
+				// Packer parameters are stored in modules
+				target = context.Modules[0];
 			}
-			else {
-				// For protections
-				var objParams = context.Annotations.Get<ProtectionSettings>(target, ParametersKey);
-				if (objParams == null)
-					return defValue;
-				if (!objParams.TryGetValue(comp, out parameters))
-					return defValue;
-			}
+
+			var objParams = context.Annotations.Get<ProtectionSettings>(target, ParametersKey);
+			if (objParams == null)
+				return defValue;
+			if (!objParams.TryGetValue(comp, out parameters))
+				return defValue;
+
 			string ret;
 			if (parameters.TryGetValue(name, out ret)) {
 				Type paramType = typeof(T);
@@ -73,7 +71,7 @@ namespace Confuser.Core {
 
 				if (paramType.IsEnum)
 					return (T)Enum.Parse(paramType, ret, true);
-				return (T)Convert.ChangeType(ret, typeof(T));
+				return (T)Convert.ChangeType(ret, paramType);
 			}
 			return defValue;
 		}
@@ -99,6 +97,5 @@ namespace Confuser.Core {
 			ConfuserContext context, IDnlibDef target) {
 			return context.Annotations.Get<ProtectionSettings>(target, ParametersKey);
 		}
-
 	}
 }

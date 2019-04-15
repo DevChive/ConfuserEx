@@ -9,13 +9,15 @@ using dnlib.DotNet;
 
 namespace Confuser.Renamer {
 	public interface INameService {
-
 		VTableStorage GetVTables();
 
 		void Analyze(IDnlibDef def);
 
 		bool CanRename(object obj);
 		void SetCanRename(object obj, bool val);
+
+		void SetParam(IDnlibDef def, string name, string value);
+		string GetParam(IDnlibDef def, string name);
 
 		RenameMode GetRenameMode(object obj);
 		void SetRenameMode(object obj, RenameMode val);
@@ -26,32 +28,37 @@ namespace Confuser.Renamer {
 		string RandomName(RenameMode mode);
 
 		void RegisterRenamer(IRenamer renamer);
+		T FindRenamer<T>();
 		void AddReference<T>(T obj, INameReference<T> reference);
 
 		void SetOriginalName(object obj, string name);
 		void SetOriginalNamespace(object obj, string ns);
 
-		void MarkHelper(IDnlibDef def, IMarkerService marker);
-
+		void MarkHelper(IDnlibDef def, IMarkerService marker, ConfuserComponent parentComp);
 	}
 
 	internal class NameService : INameService {
+		static readonly object CanRenameKey = new object();
+		static readonly object RenameModeKey = new object();
+		static readonly object ReferencesKey = new object();
+		static readonly object OriginalNameKey = new object();
+		static readonly object OriginalNamespaceKey = new object();
 
-		private static readonly object CanRenameKey = new object();
-		private static readonly object RenameModeKey = new object();
-		private static readonly object ReferencesKey = new object();
-		private static readonly object OriginalNameKey = new object();
-		private static readonly object OriginalNamespaceKey = new object();
+		readonly ConfuserContext context;
+		readonly byte[] nameSeed;
+		readonly RandomGenerator random;
+		readonly VTableStorage storage;
+		AnalyzePhase analyze;
 
-		private readonly ConfuserContext context;
-		private readonly byte[] nameSeed;
-		private readonly RandomGenerator random;
-		private readonly VTableStorage storage = new VTableStorage();
-		private AnalyzePhase analyze;
-		private readonly Dictionary<string, string> nameDict = new Dictionary<string, string>();
+		readonly HashSet<string> identifiers = new HashSet<string>();
+		readonly byte[] nameId = new byte[8];
+		readonly Dictionary<string, string> nameMap1 = new Dictionary<string, string>();
+		readonly Dictionary<string, string> nameMap2 = new Dictionary<string, string>();
+		internal ReversibleRenamer reversibleRenamer;
 
 		public NameService(ConfuserContext context) {
 			this.context = context;
+			storage = new VTableStorage(context.Logger);
 			random = context.Registry.GetService<IRandomService>().GetRandomGenerator(NameProtection._FullId);
 			nameSeed = random.NextBytes(20);
 
@@ -60,7 +67,6 @@ namespace Confuser.Renamer {
 				new VTableAnalyzer(),
 				new TypeBlobAnalyzer(),
 				new ResourceAnalyzer(),
-				new WPFAnalyzer(),
 				new LdtokenEnumAnalyzer()
 			};
 		}
@@ -87,6 +93,26 @@ namespace Confuser.Renamer {
 
 		public void SetCanRename(object obj, bool val) {
 			context.Annotations.Set(obj, CanRenameKey, val);
+		}
+
+		public void SetParam(IDnlibDef def, string name, string value) {
+			var param = ProtectionParameters.GetParameters(context, def);
+			if (param == null)
+				ProtectionParameters.SetParameters(context, def, param = new ProtectionSettings());
+			Dictionary<string, string> nameParam;
+			if (!param.TryGetValue(analyze.Parent, out nameParam))
+				param[analyze.Parent] = nameParam = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			nameParam[name] = value;
+		}
+
+		public string GetParam(IDnlibDef def, string name) {
+			var param = ProtectionParameters.GetParameters(context, def);
+			if (param == null)
+				return null;
+			Dictionary<string, string> nameParam;
+			if (!param.TryGetValue(analyze.Parent, out nameParam))
+				return null;
+			return nameParam.GetValueOrDefault(name);
 		}
 
 		public RenameMode GetRenameMode(object obj) {
@@ -119,17 +145,22 @@ namespace Confuser.Renamer {
 			analyze.Analyze(this, context, ProtectionParameters.Empty, def, true);
 		}
 
-		public string ObfuscateName(string name, RenameMode mode) {
-			if (string.IsNullOrEmpty(name))
-				return string.Empty;
+		public void SetNameId(uint id) {
+			for (int i = nameId.Length - 1; i >= 0; i--) {
+				nameId[i] = (byte)(id & 0xff);
+				id >>= 8;
+			}
+		}
 
-			if (mode == RenameMode.Empty)
-				return "";
-			if (mode == RenameMode.Debug)
-				return "_" + name;
+		void IncrementNameId() {
+			for (int i = nameId.Length - 1; i >= 0; i--) {
+				nameId[i]++;
+				if (nameId[i] != 0)
+					break;
+			}
+		}
 
-			byte[] hash = Utils.Xor(Utils.SHA1(Encoding.UTF8.GetBytes(name)), nameSeed);
-
+		string ObfuscateNameInternal(byte[] hash, RenameMode mode) {
 			switch (mode) {
 				case RenameMode.Empty:
 					return "";
@@ -140,11 +171,73 @@ namespace Confuser.Renamer {
 				case RenameMode.ASCII:
 					return Utils.EncodeString(hash, asciiCharset);
 				case RenameMode.Decodable:
-					var newName = "=" + Utils.EncodeString(hash, alphaNumCharset) + "=";
-					nameDict[newName] = name;
-					return newName;
+					IncrementNameId();
+					return "_" + Utils.EncodeString(hash, alphaNumCharset);
+				case RenameMode.Sequential:
+					IncrementNameId();
+					return "_" + Utils.EncodeString(nameId, alphaNumCharset);
+				default:
+
+					throw new NotSupportedException("Rename mode '" + mode + "' is not supported.");
 			}
-			throw new NotSupportedException("Rename mode '" + mode + "' is not supported.");
+		}
+
+		string ParseGenericName(string name, out int? count) {
+			if (name.LastIndexOf('`') != -1) {
+				int index = name.LastIndexOf('`');
+				int c;
+				if (int.TryParse(name.Substring(index + 1), out c)) {
+					count = c;
+					return name.Substring(0, index);
+				}
+			}
+			count = null;
+			return name;
+		}
+
+		string MakeGenericName(string name, int? count) {
+			if (count == null)
+				return name;
+			else
+				return string.Format("{0}`{1}", name, count.Value);
+		}
+
+		public string ObfuscateName(string name, RenameMode mode) {
+			string newName = null;
+			int? count;
+			name = ParseGenericName(name, out count);
+
+			if (string.IsNullOrEmpty(name))
+				return string.Empty;
+
+			if (mode == RenameMode.Empty)
+				return "";
+			if (mode == RenameMode.Debug)
+				return "_" + name;
+			if (mode == RenameMode.Reversible) {
+				if (reversibleRenamer == null)
+					throw new ArgumentException("Password not provided for reversible renaming.");
+				newName = reversibleRenamer.Encrypt(name);
+				return MakeGenericName(newName, count);
+			}
+
+			if (nameMap1.ContainsKey(name))
+				return nameMap1[name];
+
+			byte[] hash = Utils.Xor(Utils.SHA1(Encoding.UTF8.GetBytes(name)), nameSeed);
+			for (int i = 0; i < 100; i++) {
+				newName = ObfuscateNameInternal(hash, mode);
+				if (!identifiers.Contains(MakeGenericName(newName, count)))
+					break;
+				hash = Utils.SHA1(hash);
+			}
+
+			if ((mode & RenameMode.Decodable) != 0) {
+				nameMap2[newName] = name;
+				nameMap1[name] = newName;
+			}
+
+			return MakeGenericName(newName, count);
 		}
 
 		public string RandomName() {
@@ -156,10 +249,12 @@ namespace Confuser.Renamer {
 		}
 
 		public void SetOriginalName(object obj, string name) {
+			identifiers.Add(name);
 			context.Annotations.Set(obj, OriginalNameKey, name);
 		}
 
 		public void SetOriginalNamespace(object obj, string ns) {
+			identifiers.Add(ns);
 			context.Annotations.Set(obj, OriginalNamespaceKey, ns);
 		}
 
@@ -167,7 +262,11 @@ namespace Confuser.Renamer {
 			Renamers.Add(renamer);
 		}
 
-		public void MarkHelper(IDnlibDef def, IMarkerService marker) {
+		public T FindRenamer<T>() {
+			return Renamers.OfType<T>().Single();
+		}
+
+		public void MarkHelper(IDnlibDef def, IMarkerService marker, ConfuserComponent parentComp) {
 			if (marker.IsMarked(def))
 				return;
 			if (def is MethodDef) {
@@ -179,7 +278,6 @@ namespace Confuser.Renamer {
 			else if (def is FieldDef) {
 				var field = (FieldDef)def;
 				field.Access = FieldAttributes.Assembly;
-				field.Name = RandomName();
 				if (!field.IsSpecialName && !field.IsRuntimeSpecialName)
 					field.Name = RandomName();
 			}
@@ -192,30 +290,30 @@ namespace Confuser.Renamer {
 			}
 			SetCanRename(def, false);
 			Analyze(def);
-			marker.Mark(def);
+			marker.Mark(def, parentComp);
 		}
 
 		#region Charsets
 
-		private static readonly char[] asciiCharset = Enumerable.Range(32, 95)
-		                                                        .Select(ord => (char)ord)
-		                                                        .Except(new[] { '.' })
-		                                                        .ToArray();
+		static readonly char[] asciiCharset = Enumerable.Range(32, 95)
+		                                                .Select(ord => (char)ord)
+		                                                .Except(new[] { '.' })
+		                                                .ToArray();
 
-		private static readonly char[] letterCharset = Enumerable.Range(0, 26)
-		                                                         .SelectMany(ord => new[] { (char)('a' + ord), (char)('A' + ord) })
-		                                                         .ToArray();
+		static readonly char[] letterCharset = Enumerable.Range(0, 26)
+		                                                 .SelectMany(ord => new[] { (char)('a' + ord), (char)('A' + ord) })
+		                                                 .ToArray();
 
-		private static readonly char[] alphaNumCharset = Enumerable.Range(0, 26)
-		                                                           .SelectMany(ord => new[] { (char)('a' + ord), (char)('A' + ord) })
-		                                                           .Concat(Enumerable.Range(0, 10).Select(ord => (char)('0' + ord)))
-		                                                           .ToArray();
+		static readonly char[] alphaNumCharset = Enumerable.Range(0, 26)
+		                                                   .SelectMany(ord => new[] { (char)('a' + ord), (char)('A' + ord) })
+		                                                   .Concat(Enumerable.Range(0, 10).Select(ord => (char)('0' + ord)))
+		                                                   .ToArray();
 
 		// Especially chosen, just to mess with people.
 		// Inspired by: http://xkcd.com/1137/ :D
-		private static readonly char[] unicodeCharset = new char[] { }
+		static readonly char[] unicodeCharset = new char[] { }
 			.Concat(Enumerable.Range(0x200b, 5).Select(ord => (char)ord))
-			.Concat(Enumerable.Range(0x2028, 7).Select(ord => (char)ord))
+			.Concat(Enumerable.Range(0x2029, 6).Select(ord => (char)ord))
 			.Concat(Enumerable.Range(0x206a, 6).Select(ord => (char)ord))
 			.Except(new[] { '\u2029' })
 			.ToArray();
@@ -239,8 +337,7 @@ namespace Confuser.Renamer {
 		}
 
 		public ICollection<KeyValuePair<string, string>> GetNameMap() {
-			return nameDict;
+			return nameMap2;
 		}
-
 	}
 }

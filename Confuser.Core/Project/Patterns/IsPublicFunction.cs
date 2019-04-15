@@ -6,7 +6,6 @@ namespace Confuser.Core.Project.Patterns {
 	///     A function that indicate the visibility of members.
 	/// </summary>
 	public class IsPublicFunction : PatternFunction {
-
 		internal const string FnName = "is-public";
 
 		/// <inheritdoc />
@@ -40,8 +39,10 @@ namespace Confuser.Core.Project.Patterns {
 				return ((PropertyDef)member).IsPublic();
 			if (member is EventDef)
 				return ((EventDef)member).IsPublic();
+			if (member is TypeDef)
+				return ((TypeDef)member).IsPublic || ((TypeDef)member).IsNestedPublic;
+
 			throw new NotSupportedException();
 		}
-
 	}
 }

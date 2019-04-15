@@ -5,13 +5,16 @@ using Confuser.Protections.AntiTamper;
 using dnlib.DotNet;
 
 namespace Confuser.Protections {
-	[BeforeProtection("Ki.ControlFlow"), AfterProtection("Ki.Constants")]
-	internal class AntiTamperProtection : Protection {
+	public interface IAntiTamperService {
+		void ExcludeMethod(ConfuserContext context, MethodDef method);
+	}
 
+	[BeforeProtection("Ki.ControlFlow"), AfterProtection("Ki.Constants")]
+	internal class AntiTamperProtection : Protection, IAntiTamperService {
 		public const string _Id = "anti tamper";
 		public const string _FullId = "Ki.AntiTamper";
 		public const string _ServiceId = "Ki.AntiTamper";
-		private static readonly object HandlerKey = new object();
+		static readonly object HandlerKey = new object();
 
 		public override string Name {
 			get { return "Anti Tamper Protection"; }
@@ -34,7 +37,7 @@ namespace Confuser.Protections {
 		}
 
 		protected override void Initialize(ConfuserContext context) {
-			//
+			context.Registry.RegisterService(_ServiceId, typeof(IAntiTamperService), this);
 		}
 
 		protected override void PopulatePipeline(ProtectionPipeline pipeline) {
@@ -46,8 +49,7 @@ namespace Confuser.Protections {
 			ProtectionParameters.GetParameters(context, method).Remove(this);
 		}
 
-		private class InjectPhase : ProtectionPhase {
-
+		class InjectPhase : ProtectionPhase {
 			public InjectPhase(AntiTamperProtection parent)
 				: base(parent) { }
 
@@ -78,11 +80,9 @@ namespace Confuser.Protections {
 				modeHandler.HandleInject((AntiTamperProtection)Parent, context, parameters);
 				context.Annotations.Set(context.CurrentModule, HandlerKey, modeHandler);
 			}
-
 		}
 
-		private class MDPhase : ProtectionPhase {
-
+		class MDPhase : ProtectionPhase {
 			public MDPhase(AntiTamperProtection parent)
 				: base(parent) { }
 
@@ -101,15 +101,11 @@ namespace Confuser.Protections {
 				var modeHandler = context.Annotations.Get<IModeHandler>(context.CurrentModule, HandlerKey);
 				modeHandler.HandleMD((AntiTamperProtection)Parent, context, parameters);
 			}
-
 		}
 
-		private enum Mode {
-
+		enum Mode {
 			Normal,
 			JIT
-
 		}
-
 	}
 }

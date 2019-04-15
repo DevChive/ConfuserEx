@@ -11,9 +11,6 @@ using Ookii.Dialogs.Wpf;
 
 namespace ConfuserEx.ViewModel {
 	public class ProjectTabVM : TabViewModel {
-
-		private int selIndex = -1;
-
 		public ProjectTabVM(AppVM app)
 			: base(app, "Project") { }
 
@@ -30,11 +27,6 @@ namespace ConfuserEx.ViewModel {
 					return ret;
 				});
 			}
-		}
-
-		public int SelectedIndex {
-			get { return selIndex; }
-			set { SetProperty(ref selIndex, value, "SelectedIndex"); }
 		}
 
 		public ICommand ChooseBaseDir {
@@ -79,26 +71,24 @@ namespace ConfuserEx.ViewModel {
 		public ICommand Remove {
 			get {
 				return new RelayCommand(() => {
-					int selIndex = SelectedIndex;
-					Debug.Assert(selIndex != -1);
-					ProjectModuleVM module = App.Project.Modules[selIndex];
-					string msg = string.Format("Are you sure to remove module '{0}'?\r\nAll settings specific to it would be lost!", module.Path);
+					Debug.Assert(App.Project.Modules.Any(m => m.IsSelected));
+					string msg = "Are you sure to remove selected modules?\r\nAll settings specific to it would be lost!";
 					if (MessageBox.Show(msg, "ConfuserEx", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes) {
-						App.Project.Modules.RemoveAt(selIndex);
-						SelectedIndex = selIndex >= App.Project.Modules.Count ? App.Project.Modules.Count - 1 : selIndex;
+						foreach (var item in App.Project.Modules.Where(m => m.IsSelected).ToList())
+							App.Project.Modules.Remove(item);
 					}
-				}, () => SelectedIndex != -1);
+				}, () => App.Project.Modules.Any(m => m.IsSelected));
 			}
 		}
 
 		public ICommand Edit {
 			get {
 				return new RelayCommand(() => {
-					Debug.Assert(SelectedIndex != -1);
-					var dialog = new ProjectModuleView(App.Project.Modules[SelectedIndex]);
+					Debug.Assert(App.Project.Modules.Count(m => m.IsSelected) == 1);
+					var dialog = new ProjectModuleView(App.Project.Modules.Single(m => m.IsSelected));
 					dialog.Owner = Application.Current.MainWindow;
 					dialog.ShowDialog();
-				}, () => SelectedIndex != -1);
+				}, () => App.Project.Modules.Count(m => m.IsSelected) == 1);
 			}
 		}
 
@@ -112,7 +102,7 @@ namespace ConfuserEx.ViewModel {
 			}
 		}
 
-		private void AddModule(string file) {
+		void AddModule(string file) {
 			if (!File.Exists(file)) {
 				MessageBox.Show(string.Format("File '{0}' does not exists!", file), "ConfuserEx", MessageBoxButton.OK, MessageBoxImage.Error);
 				return;
@@ -131,6 +121,5 @@ namespace ConfuserEx.ViewModel {
 			}
 			App.Project.Modules.Add(module);
 		}
-
 	}
 }

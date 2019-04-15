@@ -1,21 +1,19 @@
 ﻿using System;
 using System.Collections.Generic;
-using Confuser.Core;
 using Confuser.DynCipher.AST;
 using Confuser.DynCipher.Generation;
 using dnlib.DotNet.Emit;
 
 namespace Confuser.Protections.ControlFlow {
 	internal class ExpressionPredicate : IPredicate {
+		readonly CFContext ctx;
+		Func<int, int> expCompiled;
+		Expression expression;
 
-		private readonly CFContext ctx;
-		private Func<int, int> expCompiled;
-		private Expression expression;
-
-		private bool inited;
-		private List<Instruction> invCompiled;
-		private Expression inverse;
-		private Local stateVar;
+		bool inited;
+		List<Instruction> invCompiled;
+		Expression inverse;
+		Local stateVar;
 
 		public ExpressionPredicate(CFContext ctx) {
 			this.ctx = ctx;
@@ -34,14 +32,14 @@ namespace Confuser.Protections.ControlFlow {
 		public void EmitSwitchLoad(IList<Instruction> instrs) {
 			instrs.Add(Instruction.Create(OpCodes.Stloc, stateVar));
 			foreach (Instruction instr in invCompiled)
-				instrs.Add(instr);
+				instrs.Add(instr.Clone());
 		}
 
 		public int GetSwitchKey(int key) {
 			return expCompiled(key);
 		}
 
-		private void Compile(CilBody body) {
+		void Compile(CilBody body) {
 			var var = new Variable("{VAR}");
 			var result = new Variable("{RESULT}");
 
@@ -59,9 +57,8 @@ namespace Confuser.Protections.ControlFlow {
 			body.MaxStack += (ushort)ctx.Depth;
 		}
 
-		private class CodeGen : CILCodeGen {
-
-			private readonly Local state;
+		class CodeGen : CILCodeGen {
+			readonly Local state;
 
 			public CodeGen(Local state, CFContext ctx, IList<Instruction> instrs)
 				: base(ctx.Method, instrs) {
@@ -73,8 +70,6 @@ namespace Confuser.Protections.ControlFlow {
 					return state;
 				return base.Var(var);
 			}
-
 		}
-
 	}
 }

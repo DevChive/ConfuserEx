@@ -1,4 +1,5 @@
 ﻿using System;
+using Confuser.Core.API;
 using Confuser.Core.Services;
 
 namespace Confuser.Core {
@@ -6,7 +7,6 @@ namespace Confuser.Core {
 	///     Core component of Confuser.
 	/// </summary>
 	public class CoreComponent : ConfuserComponent {
-
 		/// <summary>
 		///     The service ID of RNG
 		/// </summary>
@@ -32,8 +32,13 @@ namespace Confuser.Core {
 		/// </summary>
 		public const string _CompressionServiceId = "Confuser.Compression";
 
-		private readonly Marker marker;
-		private readonly ConfuserParameters parameters;
+		/// <summary>
+		///     The service ID of API Store
+		/// </summary>
+		public const string _APIStoreId = "Confuser.APIStore";
+
+		readonly Marker marker;
+		readonly ConfuserParameters parameters;
 
 		/// <summary>
 		///     Initializes a new instance of the <see cref="CoreComponent" /> class.
@@ -72,12 +77,12 @@ namespace Confuser.Core {
 			context.Registry.RegisterService(_TraceServiceId, typeof(ITraceService), new TraceService(context));
 			context.Registry.RegisterService(_RuntimeServiceId, typeof(IRuntimeService), new RuntimeService());
 			context.Registry.RegisterService(_CompressionServiceId, typeof(ICompressionService), new CompressionService(context));
+			context.Registry.RegisterService(_APIStoreId, typeof(IAPIStore), new APIStore(context));
 		}
 
 		/// <inheritdoc />
 		protected internal override void PopulatePipeline(ProtectionPipeline pipeline) {
 			//
 		}
-
 	}
 }

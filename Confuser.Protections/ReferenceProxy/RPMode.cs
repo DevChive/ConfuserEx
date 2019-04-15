@@ -9,11 +9,10 @@ using dnlib.DotNet;
 
 namespace Confuser.Protections.ReferenceProxy {
 	internal abstract class RPMode {
-
 		public abstract void ProcessCall(RPContext ctx, int instrIndex);
 		public abstract void Finalize(RPContext ctx);
 
-		private static ITypeDefOrRef Import(RPContext ctx, TypeDef typeDef) {
+		static ITypeDefOrRef Import(RPContext ctx, TypeDef typeDef) {
 			ITypeDefOrRef retTypeRef = new Importer(ctx.Module, ImporterOptions.TryToUseTypeDefs).Import(typeDef);
 			if (typeDef.Module != ctx.Module && ctx.Context.Modules.Contains((ModuleDefMD)typeDef.Module))
 				ctx.Name.AddReference(typeDef, new TypeRefReference((TypeRef)retTypeRef, typeDef));
@@ -82,13 +81,12 @@ namespace Confuser.Protections.ReferenceProxy {
 			ctx.Module.Types.Add(ret);
 
 			foreach (IDnlibDef def in ret.FindDefinitions()) {
-				ctx.Marker.Mark(def);
+				ctx.Marker.Mark(def, ctx.Protection);
 				ctx.Name.SetCanRename(def, false);
 			}
 
 			ctx.Delegates[sig] = ret;
 			return ret;
 		}
-
 	}
 }
